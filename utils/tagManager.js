@@ -3,16 +3,16 @@
 
 export async function ensureTagExists(tagName, color = "#64748b") {
   try {
-    const existing = await browser.messages.tags.list();
-    const match = existing.find(t => t.tag === tagName || t.key === tagName);
-    if (match) return match.key || tagName;
-
-    // Create new tag
+    // Modern approach: just try to create. It throws if the tag already exists.
     const key = await browser.messages.tags.create(null, tagName, color);
     return key;
   } catch (e) {
-    console.warn("Could not ensure tag exists:", tagName, e);
-    return tagName; // Fall back to using name directly
+    // Tag probably already exists — this is fine.
+    if (e.message && e.message.toLowerCase().includes("already")) {
+      return tagName;
+    }
+    console.warn("Could not create tag (may already exist):", tagName, e);
+    return tagName;
   }
 }
 

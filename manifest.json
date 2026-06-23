@@ -19,7 +19,8 @@
     "messagesUpdate",
     "messagesMove",
     "storage",
-    "notifications"
+    "notifications",
+    "messagesTags"
   ],
 
   "host_permissions": [

@@ -44,8 +44,8 @@
         
         <div id="tags-list"></div>
         
-        <button onclick="addNewTag()">+ Add New Tag</button>
-        <button class="secondary" onclick="saveAllTags()">Save All Tags</button>
+        <button id="add-tag-btn">+ Add New Tag</button>
+        <button class="secondary" id="save-tags-btn">Save All Tags</button>
       </div>
     </div>
 
@@ -55,8 +55,8 @@
         <h2>Actions (Rules)</h2>
         <p>After tagging, automatically execute actions when certain tag combinations are present.</p>
         <div id="actions-list"></div>
-        <button onclick="addNewAction()">+ Add New Action Rule</button>
-        <button class="secondary" onclick="saveAllActions()">Save Actions</button>
+        <button id="add-action-btn">+ Add New Action Rule</button>
+        <button class="secondary" id="save-actions-btn">Save Actions</button>
       </div>
     </div>
 
@@ -78,7 +78,7 @@
           <label>Max body characters (for efficiency)</label>
           <input type="number" id="maxBodyChars" value="6000">
         </div>
-        <button onclick="testOllamaConnection()">Test Ollama Connection</button>
+        <button id="test-ollama-btn">Test Ollama Connection</button>
         <div id="ollama-status" class="status" style="margin-top:8px; display:none;"></div>
       </div>
 
@@ -97,17 +97,18 @@
     <div id="test-tab" class="tab-content" style="display:none;">
       <div class="section">
         <h2>Test Classification</h2>
-        <p>Paste a sample email body to see what the LLM would do with your current tags.</p>
-        <textarea id="test-body" rows="8" style="width:100%;" placeholder="Paste email body or full content here..."></textarea>
-        <button onclick="runTestClassification()">Run Test Classification</button>
+        <p>Paste a sample email to test classification. Provide both Subject and Body for best results.</p>
+        <input type="text" id="test-subject" placeholder="Subject (e.g. Invoice for project X)" style="width:100%; margin-bottom:8px;">
+        <textarea id="test-body" rows="8" style="width:100%;" placeholder="Paste email body here..."></textarea>
+        <button id="run-test-btn">Run Test Classification</button>
         
         <div id="test-result" class="log" style="margin-top:16px; display:none;"></div>
       </div>
 
       <div class="section">
         <h2>Manual Runs</h2>
-        <button onclick="runOnCurrentFolder()">Run AI Tagger on Current Folder (unprocessed only)</button>
-        <button class="secondary" onclick="runOnAllUnprocessed()">Run on All Unprocessed Emails (slow)</button>
+        <button id="run-current-folder-btn">Run AI Tagger on Current Folder (unprocessed only)</button>
+        <button class="secondary" id="run-all-unprocessed-btn">Run on All Unprocessed Emails (slow)</button>
       </div>
     </div>
   </div>

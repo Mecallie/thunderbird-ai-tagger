@@ -15,6 +15,32 @@ document.addEventListener("DOMContentLoaded", async () => {
   document.getElementById("ollamaUrl").addEventListener("change", saveSettingsFromForm);
   document.getElementById("ollamaModel").addEventListener("change", saveSettingsFromForm);
   document.getElementById("autoProcessEnabled").addEventListener("change", saveSettingsFromForm);
+
+  // Button listeners (more reliable than inline onclick)
+  const addTagBtn = document.getElementById("add-tag-btn");
+  if (addTagBtn) addTagBtn.addEventListener("click", addNewTag);
+
+  const saveTagsBtn = document.getElementById("save-tags-btn");
+  if (saveTagsBtn) saveTagsBtn.addEventListener("click", saveAllTags);
+
+  // Additional button listeners
+  const addActionBtn = document.getElementById("add-action-btn");
+  if (addActionBtn) addActionBtn.addEventListener("click", addNewAction);
+
+  const saveActionsBtn = document.getElementById("save-actions-btn");
+  if (saveActionsBtn) saveActionsBtn.addEventListener("click", saveAllActions);
+
+  const testOllamaBtn = document.getElementById("test-ollama-btn");
+  if (testOllamaBtn) testOllamaBtn.addEventListener("click", testOllamaConnection);
+
+  const runTestBtn = document.getElementById("run-test-btn");
+  if (runTestBtn) runTestBtn.addEventListener("click", runTestClassification);
+
+  const runCurrentBtn = document.getElementById("run-current-folder-btn");
+  if (runCurrentBtn) runCurrentBtn.addEventListener("click", runOnCurrentFolder);
+
+  const runAllBtn = document.getElementById("run-all-unprocessed-btn");
+  if (runAllBtn) runAllBtn.addEventListener("click", runOnAllUnprocessed);
 });
 
 // ==================== TABS ====================
@@ -76,9 +102,10 @@ function renderTags() {
   currentTags.forEach((tag, index) => {
     const row = document.createElement("div");
     row.className = "tag-row";
+    const escapedDesc = (tag.description || '').replace(/"/g, '&quot;');
     row.innerHTML = `
       <input type="text" value="${tag.name}" placeholder="Tag name" style="flex:1; max-width:180px;" data-field="name" data-index="${index}">
-      <input type="text" value="${tag.description}" placeholder="Natural language description for the LLM..." style="flex:3;" data-field="description" data-index="${index}">
+      <input type="text" value="${escapedDesc}" placeholder="Natural language description for the LLM..." style="flex:3;" data-field="description" data-index="${index}">
       <input type="number" value="${tag.priority || 0}" style="width:70px;" title="Priority (higher = more important)" data-field="priority" data-index="${index}">
       <label style="display:flex; align-items:center; gap:4px; white-space:nowrap;">
         <input type="checkbox" ${tag.enabled !== false ? "checked" : ""} data-field="enabled" data-index="${index}"> Enabled
@@ -86,7 +113,7 @@ function renderTags() {
       <label style="display:flex; align-items:center; gap:4px; white-space:nowrap;">
         <input type="checkbox" ${tag.stopProcessing ? "checked" : ""} data-field="stopProcessing" data-index="${index}"> Stop
       </label>
-      <button class="secondary" style="padding:4px 10px;" onclick="deleteTag(${index})">×</button>
+      <button class="secondary delete-btn" style="padding:4px 10px;" data-index="${index}">×</button>
     `;
 
     // Live update on input
@@ -105,6 +132,18 @@ function renderTags() {
     });
 
     container.appendChild(row);
+
+    // Attach delete listener (avoids CSP inline onclick issues)
+    const deleteBtn = row.querySelector('.delete-btn');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', () => {
+        const idx = parseInt(deleteBtn.dataset.index);
+        if (confirm("Delete this tag?")) {
+          currentTags.splice(idx, 1);
+          renderTags();
+        }
+      });
+    }
   });
 }
 
@@ -125,7 +164,16 @@ async function saveAllTags() {
   currentTags = currentTags.filter(t => t.name && t.name.trim());
   await browser.storage.local.set({ tags: currentTags });
   showStatus("Tags saved successfully!", true);
-  // Optional: sync to Thunderbird tags system here in future
+
+  // Try to create tags in Thunderbird (optional - works even if this fails)
+  try {
+    await (await import('./utils/tagManager.js')).syncAllTagsToThunderbird(currentTags);
+    // Only show "synced" message if no error was thrown
+    showStatus("Tags saved and synced to Thunderbird!", true);
+  } catch (e) {
+    console.warn("Tag sync to Thunderbird failed (classification still works):", e);
+    // Do not show error to user - internal tags still function
+  }
 }
 
 function deleteTag(index) {
@@ -151,6 +199,7 @@ async function saveAllActions() {
 
 // ==================== TEST & MANUAL ====================
 async function runTestClassification() {
+  const subject = document.getElementById("test-subject")?.value.trim() || "Sample Email";
   const body = document.getElementById("test-body").value.trim();
   if (!body) {
     alert("Please paste some email content to test.");
@@ -164,7 +213,7 @@ async function runTestClassification() {
   try {
     const response = await browser.runtime.sendMessage({
       type: "testClassification",
-      sampleEmail: body,
+      sampleEmail: { subject, body },
       tags: currentTags.filter(t => t.enabled),
     });
 
@@ -228,13 +277,6 @@ function showStatus(msg, success = true) {
   setTimeout(() => el.remove(), 2500);
 }
 
-// Make functions global for inline onclick
-window.addNewTag = addNewTag;
-window.saveAllTags = saveAllTags;
+// Global for remaining inline onclick (delete buttons) + future use
 window.deleteTag = deleteTag;
-window.addNewAction = addNewAction;
-window.saveAllActions = saveAllActions;
-window.runTestClassification = runTestClassification;
-window.testOllamaConnection = testOllamaConnection;
-window.runOnCurrentFolder = runOnCurrentFolder;
-window.runOnAllUnprocessed = runOnAllUnprocessed;
+window.addNewAction = addNewAction; // still used if any leftover

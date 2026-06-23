@@ -87,20 +87,27 @@ ${emailContent.body || "(no body)"}
 ${emailSection}
 
 INSTRUCTIONS:
-- Decide which tags apply based ONLY on the descriptions.
-- You may select multiple tags.
-- Choose exactly ONE primary tag (the most important/relevant one). Prefer higher priority tags when there is a tie.
-- If a tag has "stop processing" behavior, still report all clearly matching tags.
-- Return ONLY valid JSON in this exact format (no extra text, no markdown):
+You are a precise email tagger. Your only job is to decide which of the tags above apply to the email.
+
+Rules:
+- Only match a tag if the email **clearly and directly** satisfies its description.
+- Do **not** guess, assume, or invent matches.
+- Do **not** create new tags that are not in the list above.
+- You may select multiple tags if they all clearly apply.
+- Choose exactly one **primary_tag** (the most relevant one).
+
+Return **only** valid JSON in this exact format (nothing else):
+
 {
   "matched_tags": ["TagName1", "TagName2"],
   "primary_tag": "TagName1",
   "reasons": {
-    "TagName1": "Short reason why it matches",
-    "TagName2": "Short reason..."
+    "TagName1": "Brief explanation based only on the description",
+    "TagName2": "Brief explanation based only on the description"
   }
 }
-If no tags match, use empty arrays and null for primary_tag.
+
+If no tags clearly apply, return empty arrays and null for primary_tag.
 `;
 }
 
@@ -175,14 +182,24 @@ function fallbackParse(text) {
 /**
  * Test helper used by Options page
  */
-export async function testClassification(sampleEmailText, tags) {
-  // Minimal email object for testing
-  const fakeEmail = {
-    subject: "Test Email",
-    from: "test@example.com",
-    date: new Date().toISOString(),
-    body: sampleEmailText,
-  };
+export async function testClassification(sampleEmail, tags) {
+  let fakeEmail;
+  if (typeof sampleEmail === 'object' && sampleEmail !== null) {
+    fakeEmail = {
+      subject: sampleEmail.subject || "Sample Email",
+      from: "test@example.com",
+      date: new Date().toISOString(),
+      body: sampleEmail.body || sampleEmail,
+    };
+  } else {
+    // Fallback for old string input
+    fakeEmail = {
+      subject: "Sample Email",
+      from: "test@example.com",
+      date: new Date().toISOString(),
+      body: sampleEmail || "",
+    };
+  }
 
   const settings = await (await import('./storage.js')).getSettings();
   return classifyEmail(fakeEmail, tags, settings);
