@@ -1,0 +1,29 @@
+{
+  "name": "thunderbird-ai-tagger",
+  "version": "0.1.0",
+  "description": "AI-powered email classification and tagging for Thunderbird/Betterbird using local Ollama",
+  "main": "background.js",
+  "scripts": {
+    "lint": "web-ext lint",
+    "build": "web-ext build --overwrite-dest",
+    "run": "web-ext run --target=thunderbird-desktop",
+    "start": "web-ext run --target=thunderbird-desktop",
+    "package": "npm run build && echo 'Extension packaged in web-ext-artifacts/'"
+  },
+  "devDependencies": {
+    "web-ext": "^8.0.0"
+  },
+  "keywords": [
+    "thunderbird",
+    "betterbird",
+    "webextension",
+    "ai",
+    "ollama",
+    "email-tagger"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/thunderbird-ai-tagger.git"
+  }
+}
