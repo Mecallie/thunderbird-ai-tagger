@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Tagger Settings</title>
+  <style>
+    body { font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 20px; background: #f8fafc; color: #1e2937; }
+    .container { max-width: 1100px; margin: 0 auto; }
+    h1 { color: #0f172a; }
+    .section { background: white; border-radius: 12px; padding: 24px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+    .tabs { display: flex; border-bottom: 2px solid #e2e8f0; margin-bottom: 20px; }
+    .tab { padding: 12px 24px; cursor: pointer; border-bottom: 3px solid transparent; }
+    .tab.active { border-bottom-color: #6366f1; font-weight: 600; color: #6366f1; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px; text-align: left; border-bottom: 1px solid #e2e8f0; }
+    input, textarea, select { width: 100%; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; }
+    button { background: #6366f1; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; }
+    button.secondary { background: #64748b; }
+    .tag-row { display: flex; gap: 12px; align-items: center; margin-bottom: 12px; }
+    .status { padding: 8px 12px; border-radius: 6px; font-size: 0.9rem; }
+    .success { background: #dcfce7; color: #166534; }
+    .error { background: #fee2e2; color: #991b1b; }
+    .log { background: #0f172a; color: #e0f2fe; padding: 12px; border-radius: 6px; font-family: monospace; white-space: pre-wrap; max-height: 300px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🤖 AI Tagger Settings</h1>
+    <p style="color:#64748b;">Thunderbird/Betterbird • Local Ollama first • One LLM call per email</p>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="tags">Tags</div>
+      <div class="tab" data-tab="actions">Actions / Rules</div>
+      <div class="tab" data-tab="settings">LLM & Settings</div>
+      <div class="tab" data-tab="test">Test & Manual Run</div>
+    </div>
+
+    <!-- TAGS TAB -->
+    <div id="tags-tab" class="tab-content">
+      <div class="section">
+        <h2>Classification Tags</h2>
+        <p>Define tags with natural language descriptions. The LLM uses these to decide matches in a single call.</p>
+        
+        <div id="tags-list"></div>
+        
+        <button onclick="addNewTag()">+ Add New Tag</button>
+        <button class="secondary" onclick="saveAllTags()">Save All Tags</button>
+      </div>
+    </div>
+
+    <!-- ACTIONS TAB -->
+    <div id="actions-tab" class="tab-content" style="display:none;">
+      <div class="section">
+        <h2>Actions (Rules)</h2>
+        <p>After tagging, automatically execute actions when certain tag combinations are present.</p>
+        <div id="actions-list"></div>
+        <button onclick="addNewAction()">+ Add New Action Rule</button>
+        <button class="secondary" onclick="saveAllActions()">Save Actions</button>
+      </div>
+    </div>
+
+    <!-- SETTINGS TAB -->
+    <div id="settings-tab" class="tab-content" style="display:none;">
+      <div class="section">
+        <h2>Ollama Configuration (Primary)</h2>
+        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+          <div>
+            <label>Ollama URL</label>
+            <input type="text" id="ollamaUrl" value="http://127.0.0.1:11434">
+          </div>
+          <div>
+            <label>Model Name</label>
+            <input type="text" id="ollamaModel" value="llama3.1:8b">
+          </div>
+        </div>
+        <div style="margin-top:12px;">
+          <label>Max body characters (for efficiency)</label>
+          <input type="number" id="maxBodyChars" value="6000">
+        </div>
+        <button onclick="testOllamaConnection()">Test Ollama Connection</button>
+        <div id="ollama-status" class="status" style="margin-top:8px; display:none;"></div>
+      </div>
+
+      <div class="section">
+        <h2>General Settings</h2>
+        <label>
+          <input type="checkbox" id="autoProcessEnabled" checked> Enable automatic processing of new emails
+        </label>
+        <br><br>
+        <label>Processed marker tag name</label>
+        <input type="text" id="processedTagName" value="🤖 AI-Processed">
+      </div>
+    </div>
+
+    <!-- TEST TAB -->
+    <div id="test-tab" class="tab-content" style="display:none;">
+      <div class="section">
+        <h2>Test Classification</h2>
+        <p>Paste a sample email body to see what the LLM would do with your current tags.</p>
+        <textarea id="test-body" rows="8" style="width:100%;" placeholder="Paste email body or full content here..."></textarea>
+        <button onclick="runTestClassification()">Run Test Classification</button>
+        
+        <div id="test-result" class="log" style="margin-top:16px; display:none;"></div>
+      </div>
+
+      <div class="section">
+        <h2>Manual Runs</h2>
+        <button onclick="runOnCurrentFolder()">Run AI Tagger on Current Folder (unprocessed only)</button>
+        <button class="secondary" onclick="runOnAllUnprocessed()">Run on All Unprocessed Emails (slow)</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>
