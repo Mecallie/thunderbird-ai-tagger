@@ -1,5 +1,7 @@
 # Thunderbird/Betterbird AI Tagger
 
+**Current version:** 0.1.1
+
 AI-powered WebExtension for automatic and manual email classification & tagging using local Ollama (primary) with clean architecture for future cloud LLM support.
 
 ## Project Goal

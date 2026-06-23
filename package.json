@@ -5,6 +5,8 @@
   "main": "background.js",
   "scripts": {
     "lint": "web-ext lint",
+    "version:sync": "node scripts/sync-version.js",
+    "prebuild": "npm run version:sync",
     "build": "web-ext build --overwrite-dest",
     "run": "web-ext run --target=thunderbird-desktop",
     "start": "web-ext run --target=thunderbird-desktop",
