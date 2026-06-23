@@ -2,8 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.4] - 2026-06-23
+
+### Added
+- Duplicate tag name prevention with warning when saving.
+- "Import tags from Thunderbird" button.
+- Visual "✓ in Thunderbird" indicator for tags that already exist natively.
+
+## [0.1.3] - 2026-06-23
+
+### Added
+- Right-click context menu: **"AI Tagger: Run classification now"** on messages (much better UX).
+- Basic **Rules / Actions** system:
+  - Create rules with required tags (`allTags` AND condition).
+  - "Move to folder" action supported.
+- Keywords are now saved and used by the LLM.
+
+## [0.1.2] - 2026-06-23
+
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [0.1.2] - 2026-06-23
+
+### Added
+- **Keywords** field for tags (comma-separated). These are sent to the LLM together with the name and description.
+- Stronger use of tag name + keywords in classification prompt (optimized for Mistral 8B and similar small models).
+
+### Changed
+- LLM prompt significantly updated to give more weight to the tag **name** and **keywords** (not only the description). This improves accuracy on 8B-class models.
 
 ## [0.1.1] - 2026-06-23
 

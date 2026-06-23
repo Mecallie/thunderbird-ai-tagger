@@ -71,7 +71,11 @@ function buildClassificationPrompt(emailContent, activeTags) {
 
   sortedTags.forEach((tag, index) => {
     tagSection += `${index + 1}. **${tag.name}** (priority: ${tag.priority || 0})\n`;
-    tagSection += `   Description: ${tag.description}\n\n`;
+    tagSection += `   Description: ${tag.description}\n`;
+    if (tag.keywords && tag.keywords.trim()) {
+      tagSection += `   Keywords: ${tag.keywords}\n`;
+    }
+    tagSection += `\n`;
   });
 
   const emailSection = `
@@ -87,27 +91,27 @@ ${emailContent.body || "(no body)"}
 ${emailSection}
 
 INSTRUCTIONS:
-You are a precise email tagger. Your only job is to decide which of the tags above apply to the email.
+You are a precise email tagger optimized for Mistral 8B. Decide which tags apply using both the tag name and its description (and keywords if present).
 
-Rules:
-- Only match a tag if the email **clearly and directly** satisfies its description.
-- Do **not** guess, assume, or invent matches.
-- Do **not** create new tags that are not in the list above.
-- You may select multiple tags if they all clearly apply.
-- Choose exactly one **primary_tag** (the most relevant one).
+Strong guidance:
+- The tag **name** is a very strong signal. A tag called "Appointment" should match meeting requests, calendar invites, scheduling emails, etc.
+- Keywords (if provided) are also strong indicators.
+- Only match if the email content reasonably aligns with the name, description, or keywords.
+- Do not invent new tags.
+- You may select multiple tags.
 
-Return **only** valid JSON in this exact format (nothing else):
+Return ONLY valid JSON in this exact format:
 
 {
   "matched_tags": ["TagName1", "TagName2"],
   "primary_tag": "TagName1",
   "reasons": {
-    "TagName1": "Brief explanation based only on the description",
-    "TagName2": "Brief explanation based only on the description"
+    "TagName1": "Why it matches (name/description/keywords)",
+    "TagName2": "Why it matches"
   }
 }
 
-If no tags clearly apply, return empty arrays and null for primary_tag.
+If no tags apply, use empty arrays and null for primary_tag.
 `;
 }
 

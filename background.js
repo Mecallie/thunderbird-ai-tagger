@@ -73,9 +73,36 @@ function setupListeners() {
 
   // Toolbar button (action) - manual trigger for selected or current view
   browser.action.onClicked.addListener(async (tab) => {
-    // For now: open options. Later we can add quick classify for current folder/selection
     browser.runtime.openOptionsPage();
   });
+
+  // Context menu: Right-click on message → AI Tagger: Run now
+  if (browser.menus) {
+    browser.menus.create({
+      id: "ai-tagger-run-now",
+      title: "AI Tagger: Run classification now",
+      contexts: ["message_list", "message_display_action"],
+    });
+
+    browser.menus.onClicked.addListener(async (info, tab) => {
+      if (info.menuItemId === "ai-tagger-run-now") {
+        try {
+          // Get selected messages
+          const messages = await browser.messages.getSelectedMessages();
+          if (messages && messages.messages.length > 0) {
+            for (const msg of messages.messages) {
+              processMessage(msg.id, { force: true }).catch(err => {
+                console.error(`[AI Tagger] Context menu error on message ${msg.id}:`, err);
+              });
+            }
+            console.log(`[AI Tagger] Started classification on ${messages.messages.length} message(s) via context menu`);
+          }
+        } catch (e) {
+          console.error("[AI Tagger] Failed to get selected messages:", e);
+        }
+      }
+    });
+  }
 
   // Listen for messages from options page (manual runs, test, etc.)
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
