@@ -279,6 +279,46 @@ function renderActions() {
   const createBtn = form.querySelector("#create-rule-btn");
   createBtn.addEventListener("click", createNewRule);
 
+  // Folder picker
+  const chooseFolderBtn = form.querySelector("#choose-folder-btn");
+  chooseFolderBtn.addEventListener("click", async () => {
+    try {
+      const accounts = await browser.accounts.list();
+      if (!accounts || accounts.length === 0) {
+        alert("No accounts found.");
+        return;
+      }
+
+      // For simplicity, use the first account's root folders
+      const rootFolder = accounts[0].rootFolder;
+      const folders = await browser.folders.getSubFolders(rootFolder, false);
+
+      if (!folders || folders.length === 0) {
+        alert("No folders found in the first account.");
+        return;
+      }
+
+      // Create a simple selection
+      let folderList = "Available folders (copy the ID):\n\n";
+      folders.forEach((folder, i) => {
+        folderList += `${i + 1}. ${folder.name}  →  ${folder.id || folder.path}\n`;
+      });
+
+      const choice = prompt(folderList + "\nEnter the number of the folder:");
+
+      if (choice) {
+        const index = parseInt(choice) - 1;
+        if (folders[index]) {
+          const selectedFolder = folders[index];
+          document.getElementById("new-rule-folder-id").value = selectedFolder.id || selectedFolder.path;
+        }
+      }
+    } catch (e) {
+      console.error("Folder picker failed:", e);
+      alert("Could not list folders. You may need to enter the Folder ID manually.");
+    }
+  });
+
   container.appendChild(form);
 }
 

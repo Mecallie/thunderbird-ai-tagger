@@ -32,17 +32,15 @@ async function ensureProcessedTagExists() {
   const tagName = settings.processedTagName || DEFAULT_PROCESSED_TAG;
 
   try {
-    // Check if tag already exists
-    const existingTags = await browser.messages.tags.list();
-    const exists = existingTags.some(t => t.tag === tagName || t.key === tagName);
-
-    if (!exists) {
-      // Create it (key can be auto-generated or we use a clean key)
-      await browser.messages.tags.create(null, tagName, "#6366f1"); // Indigo color
-      console.log(`[AI Tagger] Created processed marker tag: ${tagName}`);
+    if (browser.messages && browser.messages.tags && typeof browser.messages.tags.create === "function") {
+      await browser.messages.tags.create(null, tagName, "#6366f1");
+      console.log(`[AI Tagger] Created/ensured processed marker tag: ${tagName}`);
     }
   } catch (err) {
-    console.warn("[AI Tagger] Could not ensure processed tag (may already exist):", err);
+    // Tag probably already exists — this is fine
+    if (!err.message?.toLowerCase().includes("already")) {
+      console.warn("[AI Tagger] Could not create processed tag:", err.message);
+    }
   }
 }
 
@@ -176,12 +174,21 @@ export async function processMessage(messageId, options = {}) {
     // 5. Post-process tags (priority + stopProcessing logic)
     const finalTags = applyPriorityAndStopLogic(llmResult.matched_tags || [], allTags, llmResult.primary_tag);
 
-    // 6. Apply tags to the message
+    // 6. Apply tags to the message (with better error handling)
     const tagsToApply = [...finalTags, processedTag];
-    await browser.messages.update(messageId, {
-      tags: tagsToApply,
-      // We could also set flagged or other properties here
-    });
+    console.log(`[AI Tagger] Attempting to apply tags to message ${messageId}:`, tagsToApply);
+
+    try {
+      await browser.messages.update(messageId, {
+        tags: tagsToApply
+      });
+      console.log(`[AI Tagger] Successfully applied tags to message ${messageId}: ${finalTags.join(", ")}`);
+    } catch (updateError) {
+      console.error(`[AI Tagger] Failed to apply tags to message ${messageId}:`, updateError);
+      // Still try to mark as processed so we don't retry forever
+      await markAsProcessed(messageId, processedTag);
+      throw updateError;
+    }
 
     // 7. Execute any matching actions
     const executedActions = await actionEngine.evaluateAndExecute(messageId, finalTags, settings);
