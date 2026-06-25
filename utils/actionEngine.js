@@ -2,16 +2,15 @@
 // v1: Basic structure. Full rule engine can be expanded later.
 
 export async function evaluateAndExecute(messageId, finalTagNames, settings) {
-  const actions = await (await import('./storage.js')).getActions(); // or pass in
+  const actions = await (await import('./storage.js')).getActions();
   if (!actions || actions.length === 0) return [];
 
   const executed = [];
 
   for (const rule of actions) {
-    if (!rule.condition || !rule.action) continue;
+    if (!rule.condition || !rule.action || rule.enabled === false) continue;
 
-    // Simple AND condition check for v1
-    const conditionMet = (rule.condition.allTags || []).every(tag => finalTagNames.includes(tag));
+    const conditionMet = evaluateCondition(rule.condition, finalTagNames);
 
     if (conditionMet) {
       try {
@@ -24,6 +23,21 @@ export async function evaluateAndExecute(messageId, finalTagNames, settings) {
   }
 
   return executed;
+}
+
+function evaluateCondition(condition, finalTagNames) {
+  if (!condition || !condition.tags || condition.tags.length === 0) return false;
+
+  const ruleTags = condition.tags;
+  const hasAll = ruleTags.every(tag => finalTagNames.includes(tag));
+  const hasAny = ruleTags.some(tag => finalTagNames.includes(tag));
+
+  if (condition.operator === "OR") {
+    return hasAny;
+  } else {
+    // Default to AND
+    return hasAll;
+  }
 }
 
 async function executeAction(messageId, action) {

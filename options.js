@@ -66,16 +66,7 @@ async function loadAllData() {
   currentTags = tagsData.tags || [];
   currentActions = actionsData.actions || [];
 
-  // Try to load existing Thunderbird tags for "synced" status
-  try {
-    if (browser.messages && browser.messages.tags && browser.messages.tags.list) {
-      const tbTags = await browser.messages.tags.list();
-      window.thunderbirdExistingTags = new Set(tbTags.map(t => t.tag?.toLowerCase() || t.key?.toLowerCase()));
-    }
-  } catch (e) {
-    console.warn("Could not load existing Thunderbird tags:", e);
-    window.thunderbirdExistingTags = new Set();
-  }
+  // Tag sync removed as per user request
 }
 
 async function loadSettingsIntoForm() {
@@ -110,24 +101,10 @@ function renderTags() {
     return;
   }
 
-  // Add Import button at the top
-  const importBtn = document.createElement("button");
-  importBtn.textContent = "Import tags from Thunderbird";
-  importBtn.style.marginBottom = "12px";
-  importBtn.addEventListener("click", importThunderbirdTags);
-  container.appendChild(importBtn);
-
   currentTags.forEach((tag, index) => {
     const row = document.createElement("div");
     row.className = "tag-row";
     const escapedDesc = (tag.description || '').replace(/"/g, '&quot;');
-
-    // Check if this tag exists in Thunderbird
-    const isSynced = window.thunderbirdExistingTags && 
-                     window.thunderbirdExistingTags.has(tag.name.toLowerCase().trim());
-    const syncedBadge = isSynced 
-      ? `<span style="color:#22c55e; font-size:12px; margin-left:6px;">✓ in Thunderbird</span>` 
-      : '';
 
     row.innerHTML = `
       <input type="text" value="${tag.name}" placeholder="Tag name" style="flex:1; max-width:180px;" data-field="name" data-index="${index}">
@@ -141,7 +118,6 @@ function renderTags() {
         <input type="checkbox" ${tag.stopProcessing ? "checked" : ""} data-field="stopProcessing" data-index="${index}"> Stop
       </label>
       <button class="secondary delete-btn" style="padding:4px 10px;" data-index="${index}">×</button>
-      ${syncedBadge}
     `;
 
     // Live update on input
@@ -226,47 +202,7 @@ function deleteTag(index) {
   }
 }
 
-async function importThunderbirdTags() {
-  try {
-    if (!browser.messages || !browser.messages.tags || !browser.messages.tags.list) {
-      alert("Importing tags is not supported in this version of Thunderbird/Betterbird.");
-      return;
-    }
-
-    const tbTags = await browser.messages.tags.list();
-    let importedCount = 0;
-
-    for (const tbTag of tbTags) {
-      const tagName = tbTag.tag || tbTag.key;
-      if (!tagName) continue;
-
-      // Check if we already have this tag
-      const exists = currentTags.some(t => t.name.toLowerCase() === tagName.toLowerCase());
-      if (!exists) {
-        currentTags.push({
-          id: Date.now().toString(36) + importedCount,
-          name: tagName,
-          description: `Imported from Thunderbird`,
-          keywords: "",
-          priority: 0,
-          enabled: true,
-          stopProcessing: false,
-        });
-        importedCount++;
-      }
-    }
-
-    if (importedCount > 0) {
-      renderTags();
-      showStatus(`${importedCount} tag(s) imported from Thunderbird`, true);
-    } else {
-      alert("No new tags found to import.");
-    }
-  } catch (e) {
-    console.error("Failed to import Thunderbird tags:", e);
-    alert("Could not import tags from Thunderbird.");
-  }
-}
+// Tag import functionality removed as per user request
 
 // ==================== ACTIONS / RULES ====================
 function renderActions() {
@@ -274,24 +210,32 @@ function renderActions() {
   container.innerHTML = "";
 
   if (currentActions.length === 0) {
-    container.innerHTML = `<p style="color:#64748b;">No rules yet. Create your first rule below.</p>`;
+    const empty = document.createElement("p");
+    empty.style.color = "#64748b";
+    empty.textContent = "No rules yet. Create your first rule below.";
+    container.appendChild(empty);
   }
 
   currentActions.forEach((rule, index) => {
     const div = document.createElement("div");
-    div.className = "rule-row";
     div.style.cssText = "border:1px solid #334155; padding:12px; margin-bottom:12px; border-radius:6px;";
 
-    const allTags = (rule.condition?.allTags || []).join(", ");
-    const actionText = rule.action?.type === "move" 
-      ? `Move to folder: ${rule.action.targetFolderId || "(not set)"}` 
-      : rule.action?.type || "No action";
+    const tags = rule.condition?.tags || [];
+    const operator = rule.condition?.operator || "AND";
+    const action = rule.action || {};
+
+    let actionText = "";
+    if (action.type === "move") actionText = `Move to folder`;
+    else if (action.type === "archive") actionText = "Archive";
+    else if (action.type === "delete") actionText = "Delete";
 
     div.innerHTML = `
-      <strong>${rule.name || "Unnamed Rule"}</strong><br>
-      <small>When message has all these tags: <strong>${allTags || "(none)"}</strong></small><br>
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <strong>${rule.name || "Unnamed Rule"}</strong>
+        <button class="secondary" style="padding:2px 8px;" data-index="${index}">Delete</button>
+      </div>
+      <small>Condition: <strong>${tags.join(` ${operator} `) || "(none)"}</strong></small><br>
       <small>Action: ${actionText}</small>
-      <button class="secondary" style="float:right; padding:2px 8px;" data-index="${index}">Delete</button>
     `;
 
     const delBtn = div.querySelector("button");
@@ -305,48 +249,69 @@ function renderActions() {
     container.appendChild(div);
   });
 
-  // Simple rule creation form
+  // Rule creation form
   const form = document.createElement("div");
   form.style.cssText = "margin-top:20px; padding:16px; background:#1e2937; border-radius:8px;";
   form.innerHTML = `
     <h4 style="margin-top:0;">Create New Rule</h4>
-    <input type="text" id="new-rule-name" placeholder="Rule name (e.g. Move Invoices)" style="width:100%; margin-bottom:8px;">
-    <input type="text" id="new-rule-tags" placeholder="Required tags (comma separated, e.g. Invoice, Finance)" style="width:100%; margin-bottom:8px;">
-    <select id="new-rule-action-type" style="width:100%; margin-bottom:8px;">
+    
+    <input type="text" id="new-rule-name" placeholder="Rule name" style="width:100%; margin-bottom:8px;">
+    
+    <div style="display:flex; gap:8px; margin-bottom:8px;">
+      <input type="text" id="new-rule-tags" placeholder="Tags (comma separated)" style="flex:1;">
+      <select id="new-rule-operator" style="width:90px;">
+        <option value="AND">AND</option>
+        <option value="OR">OR</option>
+      </select>
+    </div>
+    
+    <select id="new-rule-action" style="width:100%; margin-bottom:8px;">
       <option value="move">Move to folder</option>
+      <option value="archive">Archive</option>
+      <option value="delete">Delete</option>
     </select>
-    <input type="text" id="new-rule-folder-id" placeholder="Target Folder ID (paste from folder properties)" style="width:100%; margin-bottom:12px;">
+    
+    <input type="text" id="new-rule-folder-id" placeholder="Folder ID (only for Move)" style="width:100%; margin-bottom:12px;">
+    
     <button id="create-rule-btn">Create Rule</button>
   `;
 
   const createBtn = form.querySelector("#create-rule-btn");
-  createBtn.addEventListener("click", () => {
-    const name = document.getElementById("new-rule-name").value.trim();
-    const tagsStr = document.getElementById("new-rule-tags").value.trim();
-    const folderId = document.getElementById("new-rule-folder-id").value.trim();
-
-    if (!name || !tagsStr) {
-      alert("Please enter a name and at least one tag.");
-      return;
-    }
-
-    const allTags = tagsStr.split(",").map(t => t.trim()).filter(Boolean);
-
-    const newRule = {
-      id: Date.now().toString(36),
-      name: name,
-      condition: { allTags: allTags },
-      action: {
-        type: "move",
-        targetFolderId: folderId || null
-      }
-    };
-
-    currentActions.push(newRule);
-    renderActions();
-  });
+  createBtn.addEventListener("click", createNewRule);
 
   container.appendChild(form);
+}
+
+function createNewRule() {
+  const name = document.getElementById("new-rule-name").value.trim();
+  const tagsStr = document.getElementById("new-rule-tags").value.trim();
+  const operator = document.getElementById("new-rule-operator").value;
+  const actionType = document.getElementById("new-rule-action").value;
+  const folderId = document.getElementById("new-rule-folder-id").value.trim();
+
+  if (!name || !tagsStr) {
+    alert("Please enter a rule name and at least one tag.");
+    return;
+  }
+
+  const tags = tagsStr.split(",").map(t => t.trim()).filter(Boolean);
+
+  const newRule = {
+    id: Date.now().toString(36),
+    name: name,
+    enabled: true,
+    condition: {
+      operator: operator,
+      tags: tags
+    },
+    action: {
+      type: actionType,
+      targetFolderId: actionType === "move" ? folderId : null
+    }
+  };
+
+  currentActions.push(newRule);
+  renderActions();
 }
 
 function addNewAction() {
