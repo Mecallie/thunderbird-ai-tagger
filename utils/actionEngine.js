@@ -54,7 +54,15 @@ async function executeAction(messageId, action) {
       break;
 
     case "delete":
-      await browser.messages.delete([messageId], { deletePermanently: action.permanent || false });
+      try {
+        if (typeof browser.messages.delete === "function") {
+          await browser.messages.delete([messageId], { deletePermanently: action.permanent || false });
+        } else {
+          console.warn("[AI Tagger] browser.messages.delete() is not available in this environment. Delete action skipped.");
+        }
+      } catch (e) {
+        console.error("[AI Tagger] Delete action failed:", e);
+      }
       break;
 
     case "markRead":

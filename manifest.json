@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "AI Tagger for Thunderbird",
-  "version": "0.1.6",
+  "version": "0.1.14",
   "description": "AI-powered email classification and tagging using local Ollama (with future cloud support). Automatically or manually tags emails based on your custom natural language rules.",
   "author": "Your Name",
   "homepage_url": "https://github.com/yourname/thunderbird-ai-tagger",

@@ -1,6 +1,6 @@
 {
   "name": "thunderbird-ai-tagger",
-  "version": "0.1.6",
+  "version": "0.1.14",
   "description": "AI-powered email classification and tagging for Thunderbird/Betterbird using local Ollama",
   "main": "background.js",
   "scripts": {

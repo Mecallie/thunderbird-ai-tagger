@@ -172,32 +172,38 @@ export async function processMessage(messageId, options = {}) {
     const llmResult = await ollama.classifyEmail(emailContent, activeTags, settings);
 
     // 5. Post-process tags (priority + stopProcessing logic)
-    const finalTags = applyPriorityAndStopLogic(llmResult.matched_tags || [], allTags, llmResult.primary_tag);
+    const finalTagNames = applyPriorityAndStopLogic(llmResult.matched_tags || [], allTags, llmResult.primary_tag);
 
-    // 6. Apply tags to the message (with better error handling)
-    const tagsToApply = [...finalTags, processedTag];
+    // Resolve tag names to keys (more reliable for messages.update)
+    const tagKeyMap = new Map(allTags.map(t => [t.name, t.key || t.name]));
+    const finalTagKeys = finalTagNames.map(name => tagKeyMap.get(name) || name);
+
+    // Also handle processed tag key if available
+    const processedTagKey = settings.processedTagKey || processedTag;
+
+    // 6. Apply tags to the message (using keys when available)
+    const tagsToApply = [...finalTagKeys, processedTagKey];
     console.log(`[AI Tagger] Attempting to apply tags to message ${messageId}:`, tagsToApply);
 
     try {
       await browser.messages.update(messageId, {
         tags: tagsToApply
       });
-      console.log(`[AI Tagger] Successfully applied tags to message ${messageId}: ${finalTags.join(", ")}`);
+      console.log(`[AI Tagger] Successfully applied tags to message ${messageId}: ${finalTagNames.join(", ")}`);
     } catch (updateError) {
       console.error(`[AI Tagger] Failed to apply tags to message ${messageId}:`, updateError);
-      // Still try to mark as processed so we don't retry forever
       await markAsProcessed(messageId, processedTag);
       throw updateError;
     }
 
     // 7. Execute any matching actions
-    const executedActions = await actionEngine.evaluateAndExecute(messageId, finalTags, settings);
+    const executedActions = await actionEngine.evaluateAndExecute(messageId, finalTagNames, settings);
 
-    console.log(`[AI Tagger] Successfully tagged message ${messageId} with: ${finalTags.join(", ")} (primary: ${llmResult.primary_tag || finalTags[0] || "none"})`);
+    console.log(`[AI Tagger] Successfully tagged message ${messageId} with: ${finalTagNames.join(", ")} (primary: ${llmResult.primary_tag || finalTagNames[0] || "none"})`);
 
     return {
       success: true,
-      matchedTags: finalTags,
+      matchedTags: finalTagNames,
       primaryTag: llmResult.primary_tag,
       reasons: llmResult.reasons,
       actionsExecuted: executedActions,

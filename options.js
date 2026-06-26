@@ -181,18 +181,21 @@ async function saveAllTags() {
     return;
   }
 
+  // Try to create tags in Thunderbird and capture keys
+  for (const tag of currentTags) {
+    if (!tag.key && browser.messages && browser.messages.tags && typeof browser.messages.tags.create === "function") {
+      try {
+        const key = await browser.messages.tags.create(null, tag.name, "#64748b");
+        tag.key = key;
+      } catch (e) {
+        // Tag probably already exists or creation failed — we'll fall back to name
+        console.warn(`Could not create tag "${tag.name}" to get key:`, e.message);
+      }
+    }
+  }
+
   await browser.storage.local.set({ tags: currentTags });
   showStatus("Tags saved successfully!", true);
-
-  // Try to create tags in Thunderbird (optional - works even if this fails)
-  try {
-    await (await import('./utils/tagManager.js')).syncAllTagsToThunderbird(currentTags);
-    // Only show "synced" message if no error was thrown
-    showStatus("Tags saved and synced to Thunderbird!", true);
-  } catch (e) {
-    console.warn("Tag sync to Thunderbird failed (classification still works):", e);
-    // Do not show error to user - internal tags still function
-  }
 }
 
 function deleteTag(index) {
@@ -207,119 +210,100 @@ function deleteTag(index) {
 // ==================== ACTIONS / RULES ====================
 function renderActions() {
   const container = document.getElementById("actions-list");
+  if (!container) return;
+
   container.innerHTML = "";
 
   if (currentActions.length === 0) {
-    const empty = document.createElement("p");
-    empty.style.color = "#64748b";
-    empty.textContent = "No rules yet. Create your first rule below.";
-    container.appendChild(empty);
+    const p = document.createElement("p");
+    p.style.color = "#64748b";
+    p.textContent = "No rules yet. Create your first rule below.";
+    container.appendChild(p);
   }
 
+  // Render existing rules
   currentActions.forEach((rule, index) => {
     const div = document.createElement("div");
     div.style.cssText = "border:1px solid #334155; padding:12px; margin-bottom:12px; border-radius:6px;";
 
     const tags = rule.condition?.tags || [];
     const operator = rule.condition?.operator || "AND";
-    const action = rule.action || {};
+    const actionType = rule.action?.type || "";
 
-    let actionText = "";
-    if (action.type === "move") actionText = `Move to folder`;
-    else if (action.type === "archive") actionText = "Archive";
-    else if (action.type === "delete") actionText = "Delete";
+    let actionText = actionType;
+    if (actionType === "move") actionText = "Move to folder";
+    else if (actionType === "archive") actionText = "Archive";
+    else if (actionType === "moveToTrash") actionText = "Move to Trash";
 
     div.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center;">
         <strong>${rule.name || "Unnamed Rule"}</strong>
-        <button class="secondary" style="padding:2px 8px;" data-index="${index}">Delete</button>
+        <button class="secondary" data-action="delete" data-index="${index}">Delete</button>
       </div>
       <small>Condition: <strong>${tags.join(` ${operator} `) || "(none)"}</strong></small><br>
       <small>Action: ${actionText}</small>
     `;
 
-    const delBtn = div.querySelector("button");
-    delBtn.addEventListener("click", () => {
+    container.appendChild(div);
+  });
+
+  // Create Rule Form
+  const formHTML = `
+    <div style="margin-top:20px; padding:16px; background:#1e2937; border-radius:8px;">
+      <h4 style="margin-top:0;">Create New Rule</h4>
+      
+      <input type="text" id="new-rule-name" placeholder="Rule name" style="width:100%; margin-bottom:8px;">
+      
+      <div style="display:flex; gap:8px; margin-bottom:8px;">
+        <input type="text" id="new-rule-tags" placeholder="Tags (comma separated)" style="flex:1;">
+        <select id="new-rule-operator" style="width:90px;">
+          <option value="AND">AND</option>
+          <option value="OR">OR</option>
+        </select>
+      </div>
+
+      <select id="new-rule-action" style="width:100%; margin-bottom:8px;">
+        <option value="move">Move to folder</option>
+        <option value="archive">Archive</option>
+        <option value="delete">Delete</option>
+      </select>
+
+      <div style="display:flex; gap:8px; margin-bottom:12px;">
+        <input type="text" id="new-rule-folder-id" placeholder="Folder ID (for Move)" style="flex:1;">
+        <button type="button" id="choose-folder-btn">Choose folder...</button>
+      </div>
+
+      <button id="create-rule-btn">Create Rule</button>
+    </div>
+  `;
+
+  container.insertAdjacentHTML("beforeend", formHTML);
+
+  // Event delegation - very stable
+  container.onclick = function(e) {
+    const target = e.target;
+
+    // Delete rule
+    if (target.dataset.action === "delete") {
+      const index = parseInt(target.dataset.index);
       if (confirm("Delete this rule?")) {
         currentActions.splice(index, 1);
         renderActions();
       }
-    });
-
-    container.appendChild(div);
-  });
-
-  // Rule creation form
-  const form = document.createElement("div");
-  form.style.cssText = "margin-top:20px; padding:16px; background:#1e2937; border-radius:8px;";
-  form.innerHTML = `
-    <h4 style="margin-top:0;">Create New Rule</h4>
-    
-    <input type="text" id="new-rule-name" placeholder="Rule name" style="width:100%; margin-bottom:8px;">
-    
-    <div style="display:flex; gap:8px; margin-bottom:8px;">
-      <input type="text" id="new-rule-tags" placeholder="Tags (comma separated)" style="flex:1;">
-      <select id="new-rule-operator" style="width:90px;">
-        <option value="AND">AND</option>
-        <option value="OR">OR</option>
-      </select>
-    </div>
-    
-    <select id="new-rule-action" style="width:100%; margin-bottom:8px;">
-      <option value="move">Move to folder</option>
-      <option value="archive">Archive</option>
-      <option value="delete">Delete</option>
-    </select>
-    
-    <input type="text" id="new-rule-folder-id" placeholder="Folder ID (only for Move)" style="width:100%; margin-bottom:12px;">
-    
-    <button id="create-rule-btn">Create Rule</button>
-  `;
-
-  const createBtn = form.querySelector("#create-rule-btn");
-  createBtn.addEventListener("click", createNewRule);
-
-  // Folder picker
-  const chooseFolderBtn = form.querySelector("#choose-folder-btn");
-  chooseFolderBtn.addEventListener("click", async () => {
-    try {
-      const accounts = await browser.accounts.list();
-      if (!accounts || accounts.length === 0) {
-        alert("No accounts found.");
-        return;
-      }
-
-      // For simplicity, use the first account's root folders
-      const rootFolder = accounts[0].rootFolder;
-      const folders = await browser.folders.getSubFolders(rootFolder, false);
-
-      if (!folders || folders.length === 0) {
-        alert("No folders found in the first account.");
-        return;
-      }
-
-      // Create a simple selection
-      let folderList = "Available folders (copy the ID):\n\n";
-      folders.forEach((folder, i) => {
-        folderList += `${i + 1}. ${folder.name}  →  ${folder.id || folder.path}\n`;
-      });
-
-      const choice = prompt(folderList + "\nEnter the number of the folder:");
-
-      if (choice) {
-        const index = parseInt(choice) - 1;
-        if (folders[index]) {
-          const selectedFolder = folders[index];
-          document.getElementById("new-rule-folder-id").value = selectedFolder.id || selectedFolder.path;
-        }
-      }
-    } catch (e) {
-      console.error("Folder picker failed:", e);
-      alert("Could not list folders. You may need to enter the Folder ID manually.");
+      return;
     }
-  });
 
-  container.appendChild(form);
+    // Choose folder
+    if (target.id === "choose-folder-btn") {
+      chooseFolderForRule();
+      return;
+    }
+
+    // Create rule
+    if (target.id === "create-rule-btn") {
+      createNewRule();
+    }
+  };
 }
 
 function createNewRule() {
@@ -352,6 +336,27 @@ function createNewRule() {
 
   currentActions.push(newRule);
   renderActions();
+}
+
+async function chooseFolderForRule() {
+  try {
+    const accounts = await browser.accounts.list();
+    if (!accounts?.length) return alert("No accounts found.");
+
+    const folders = await browser.folders.getSubFolders(accounts[0].rootFolder, false);
+    if (!folders?.length) return alert("No folders found.");
+
+    let list = folders.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
+    const choice = prompt("Select folder number:\n\n" + list);
+    const idx = parseInt(choice) - 1;
+
+    if (folders[idx]) {
+      document.getElementById("new-rule-folder-id").value = folders[idx].id || folders[idx].path;
+    }
+  } catch (e) {
+    console.error(e);
+    alert("Could not load folders.");
+  }
 }
 
 function addNewAction() {
@@ -418,16 +423,30 @@ async function testOllamaConnection() {
 }
 
 async function runOnCurrentFolder() {
-  if (!confirm("Run AI classification on the currently selected folder? This may take time depending on number of emails.")) return;
-
   try {
-    // In a real implementation we would need the current folder ID from a message or mailTab.
-    // For v1 scaffold we show how it would work.
-    alert("Folder run requires knowing the current folder ID. In full version we will query active mail tab.\n\nFor now, use the background classifyFolder function or implement folder picker.");
-    // Example call:
-    // const result = await browser.runtime.sendMessage({ type: "classifyFolder", folderId: "someId" });
+    const accounts = await browser.accounts.list();
+    if (!accounts?.length) return alert("No accounts found.");
+
+    const folders = await browser.folders.getSubFolders(accounts[0].rootFolder, false);
+    if (!folders?.length) return alert("No folders found.");
+
+    let list = folders.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
+    const choice = prompt("Select folder to run classification on:\n\n" + list);
+    const idx = parseInt(choice) - 1;
+
+    if (!folders[idx]) return;
+
+    const folderId = folders[idx].id || folders[idx].path;
+
+    if (!confirm(`Run AI classification on folder "${folders[idx].name}"?`)) return;
+
+    // For now we just show how it would work
+    alert(`Would run classification on folder: ${folders[idx].name}\n\nFolder ID: ${folderId}\n\n(Full implementation requires classifyFolder background support)`);
+
+    // Future: await browser.runtime.sendMessage({ type: "classifyFolder", folderId });
   } catch (e) {
-    alert("Error: " + e.message);
+    console.error(e);
+    alert("Could not load folders.");
   }
 }
 
