@@ -1,7 +1,7 @@
 {
   "name": "thunderbird-ai-tagger",
-  "version": "0.1.14",
-  "description": "AI-powered email classification and tagging for Thunderbird/Betterbird using local Ollama",
+  "version": "0.1.20",
+  "description": "Thunderbird/Betterbird MailExtension: classify and tag email with a local Ollama LLM using natural-language rules. Private, one-call-per-message, with optional move/archive actions.",
   "main": "background.js",
   "scripts": {
     "lint": "web-ext lint",
@@ -15,17 +15,46 @@
   "devDependencies": {
     "web-ext": "^8.0.0"
   },
+  "webExt": {
+    "ignoreFiles": [
+      "node_modules/**",
+      "web-ext-artifacts/**",
+      "package.json",
+      "package-lock.json",
+      "README.md",
+      "CHANGELOG.md",
+      "scripts/**",
+      ".github/**",
+      ".git/**",
+      ".gitignore",
+      "*.py"
+    ]
+  },
   "keywords": [
     "thunderbird",
     "betterbird",
+    "thunderbird-addon",
+    "mail-extension",
     "webextension",
+    "mozilla",
+    "email",
+    "email-classification",
+    "email-automation",
+    "email-tagger",
     "ai",
+    "llm",
     "ollama",
-    "email-tagger"
+    "local-ai",
+    "privacy"
   ],
   "license": "MIT",
+  "author": "Mecallie",
+  "homepage": "https://github.com/Mecallie/thunderbird-ai-tagger",
+  "bugs": {
+    "url": "https://github.com/Mecallie/thunderbird-ai-tagger/issues"
+  },
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/thunderbird-ai-tagger.git"
+    "url": "https://github.com/Mecallie/thunderbird-ai-tagger.git"
   }
 }

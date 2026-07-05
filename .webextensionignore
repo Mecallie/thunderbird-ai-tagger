@@ -1,0 +1,12 @@
+node_modules/
+web-ext-artifacts/
+package.json
+package-lock.json
+README.md
+CHANGELOG.md
+.git/
+.gitignore
+gitignore
+scripts/
+.github/
+*.py

@@ -1,124 +1,83 @@
-# Thunderbird/Betterbird AI Tagger
+# AI Tagger for Thunderbird
 
-**Current version:** 0.1.1
+[![Version](https://img.shields.io/badge/version-0.1.20-blue)](https://github.com/Mecallie/thunderbird-ai-tagger/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Thunderbird](https://img.shields.io/badge/Thunderbird-128%2B-orange)](https://www.thunderbird.net/)
 
-AI-powered WebExtension for automatic and manual email classification & tagging using local Ollama (primary) with clean architecture for future cloud LLM support.
+A Thunderbird/Betterbird MailExtension that classifies and tags email using a **local Ollama** LLM. Define tags in plain English; the extension matches incoming mail in a single LLM call, applies Thunderbird tags, runs optional rules (move, archive, trash), and marks messages as processed.
 
-## Project Goal
-Reduce manual email organization by letting users define tags in natural language. The LLM classifies each email against all active tags in **one efficient call**, applies matching tags (with one designated as primary), executes configurable actions (move, etc.), and marks the email as processed.
+**Privacy-first:** email content is sent only to your local Ollama instance (`localhost`). No cloud API required.
 
-## High-Level Architecture
+## Features
 
-### Core Principles (v1)
-- **One LLM call per email** — All active tag descriptions are sent together. LLM performs multi-label classification + picks primary tag.
-- **Local-first** — Optimized for Ollama (`/api/chat` recommended for structured output).
-- **Standard WebExtension only** — No Experiments. Uses `browser.messages.*` APIs.
-- **Processed state** — Special tag `🤖 AI-Processed` (configurable) + check on MessageHeader.tags.
-- **Priority + Stop Processing** — Tags have priority (higher = more important). Stop flag used in post-processing: apply higher-priority matched tags first; if a stop tag matches, skip lower-priority ones after it.
-- **Actions are rule-based** — Separate from tags. After tagging, evaluate simple AND conditions on the resulting tag set and execute actions (move/copy/archive/delete/mark read, etc.).
-- **Efficient & cache-friendly** — Skip already-processed emails. Body truncated intelligently. Background processing.
+- **One LLM call per email** — all active tag definitions are evaluated together for efficiency
+- **Natural-language tags** — describe when a tag should apply; optional keywords for small models
+- **Automatic processing** — classify new mail as it arrives (`onNewMailReceived`)
+- **Manual runs** — context menu, folder batch, or all-unprocessed across accounts
+- **Action rules** — move, archive, or trash when tag conditions match (AND/OR)
+- **Priority & stop processing** — control which tags win when multiple match
+- **Processed marker** — skip already-classified messages (configurable tag)
+- **Built-in tester** — paste sample email content and inspect JSON results in Options
 
-### Data Flow (Automatic on New Mail)
-1. `browser.messages.onNewMailReceived` fires.
-2. For each message:
-   - Get full MessageHeader (check if already has "AI-Processed" tag → skip).
-   - Extract clean plain-text content (subject, from, date, body).
-   - Load enabled tags from storage.
-   - Build structured prompt (system + tag list with descriptions/priorities + email content).
-   - Call Ollama → expect reliable JSON: `{ matched_tags: string[], primary_tag: string, reasons?: object }`.
-   - Parse (robust: JSON first, fallback heuristics).
-   - Post-process:
-     - Sort matched by priority desc.
-     - Apply tags in order; respect stopProcessing (stop applying lower ones after a stop tag).
-     - Designate primary (from LLM or highest priority).
-   - Apply all final tags + the processed marker tag via `browser.messages.update()`.
-   - Evaluate action rules against the final tag set → execute (move, etc.).
-3. Done. User sees tags immediately.
+## Requirements
 
-### Manual / Bulk Mode
-- From Options page: "Run on selected", "Run on current folder", "Run on all unprocessed".
-- Re-uses the same `classifyMessage(messageId)` function.
-- Batch with small delays to be nice to local LLM.
+- [Thunderbird](https://www.thunderbird.net/) or [Betterbird](https://www.betterbird.eu/) **128+**
+- [Ollama](https://ollama.com/) running locally with a pulled model (default: `llama3.1:8b`)
 
-### Storage Schema (browser.storage.local)
-```js
-{
-  tags: [                          // User-defined classification tags
-    {
-      id: "uuid-or-timestamp",
-      name: "Work",
-      description: "Professional work-related emails, projects, deadlines, colleagues...",
-      priority: 10,
-      enabled: true,
-      stopProcessing: false,
-      color: "#4ade80"             // Optional, for future Thunderbird tag sync
-    },
-    ...
-  ],
-  actions: [                       // Rules executed after tagging
-    {
-      id: "...",
-      name: "Move invoices to Finance",
-      condition: { allTags: ["Invoice", "Finance"] },  // AND for v1
-      action: { type: "move", target: "folderId-or-path" } // or "archive", "delete", "markRead", etc.
-    }
-  ],
-  settings: {
-    ollamaUrl: "http://127.0.0.1:11434",
-    ollamaModel: "llama3.1:8b",
-    processedTagName: "🤖 AI-Processed",
-    autoProcessEnabled: true,
-    scopedAccountIds: [],          // empty = all
-    maxBodyChars: 6000,
-    temperature: 0.1
-  },
-  // Optional lightweight cache for recent classifications (messageId → summary)
-  classificationCache: {}
-}
+## Installation
+
+### From source (development)
+
+```bash
+git clone https://github.com/Mecallie/thunderbird-ai-tagger.git
+cd thunderbird-ai-tagger
+npm install
+npm run build
 ```
 
-### LLM Prompt Strategy (One Call, Multi-Tag)
-System prompt explains the task, output format (strict JSON), and how to use descriptions + priorities.
-User message: List of active tags (name + description + priority) + email headers + truncated body.
-LLM returns JSON only → easy to parse.
+Load the built extension in Thunderbird:
 
-This keeps it efficient even with 20+ tags.
+1. **Add-ons and Themes** → gear icon → **Debug Add-ons**
+2. **Load Temporary Add-on** → select `manifest.json` (or install the zip from `web-ext-artifacts/`)
 
-### Main Components / Files
-- `manifest.json` — Permissions, background, options_ui.
-- `background.js` — Event listeners (new mail, toolbar), orchestration of classification, Ollama calls (via utils), apply logic, action engine.
-- `options.html` + `options.js` — Full settings UI (Tags CRUD, Actions CRUD, Test classifier, Ollama status, Run manual jobs).
-- `utils/`
-  - `storage.js` — Typed get/set helpers + defaults.
-  - `ollama.js` — `classifyWithOllama(emailContent, tags, settings)` + prompt builder + robust parser.
-  - `email.js` — `getMessageContent(messageId)`, extract plain text, truncate.
-  - `tagManager.js` — CRUD tags, ensure Thunderbird tags exist via `browser.messages.tags.create()`.
-  - `actionEngine.js` — Evaluate rules, execute actions (move, etc.).
-- `icons/` — Placeholder icons (replace with real ones later).
+### From release zip
 
-### Why This Architecture Works Well
-- Clean separation → easy for AI (Grok) to generate and iterate one module at a time.
-- Ollama priority: Simple fetch, no extra deps.
-- Future cloud: Swap `ollama.js` with a provider abstraction (OpenAI-compatible) without touching core flow.
-- One LLM call: Achieved by sending all tag descriptions in a single well-crafted prompt.
-- Thunderbird/Betterbird compatible: Uses only standard documented MailExtension APIs.
+Download `ai_tagger_for_thunderbird-0.1.20.zip` from [Releases](https://github.com/Mecallie/thunderbird-ai-tagger/releases), then load it as a temporary add-on (or install via your preferred method).
 
-## Development Workflow
-1. Load as **Temporary Add-on** via Thunderbird Add-ons → ⚙ → Debug Add-ons → Load Temporary Add-on (select manifest.json).
-2. Use `web-ext` CLI for lint/build if desired: `web-ext build`.
-3. Options page opens in tab for configuration.
-4. Test with real emails or the built-in tester in Options.
+## Quick start
 
-## Current Status (Scaffold)
-This is the initial project skeleton created with Grok. We will build it step-by-step:
-- Manifest + basic structure done.
-- Next: Define storage defaults + implement Ollama client + prompt.
-- Then background orchestration.
-- Then Options UI.
-- Then tag/action engines.
-- Polish, error handling, batch processing, testing.
+1. Open **AI Tagger** settings (toolbar button or Add-ons → Preferences).
+2. Confirm **Ollama URL** and model, then click **Test Ollama Connection**.
+3. On the **Tags** tab, add tags with descriptions and click **Save All Tags**.
+4. Enable **automatic processing** on the **LLM & Settings** tab, or use **Test & Manual Run** to try a sample email.
 
-Let's continue iteratively. Tell me what to implement or refine first!
+## Development
+
+```bash
+npm run lint      # web-ext lint
+npm run build     # package to web-ext-artifacts/
+npm run start     # run with web-ext (Thunderbird target)
+```
+
+Background script logs appear in **about:debugging → This Thunderbird → AI Tagger → Inspect**. The options page has its own console.
+
+## Architecture
+
+| File | Role |
+|------|------|
+| `background.js` | New-mail listener, classification orchestration, bulk runs |
+| `options.html` / `options.js` | Settings UI (tags, rules, Ollama config, tester) |
+| `utils/ollama.js` | Prompt builder, Ollama `/api/chat`, JSON parsing |
+| `utils/email.js` | Extract plain-text body from messages |
+| `utils/tagManager.js` | Sync tags with Thunderbird's tag system |
+| `utils/actionEngine.js` | Post-classification rules (move, archive, trash) |
+| `utils/folders.js` | Folder picker for action rules |
+| `utils/storage.js` | `browser.storage.local` helpers |
 
 ## License
-MIT (or your choice)
+
+MIT — see [LICENSE](LICENSE) if present, or MIT as stated in `package.json`.
+
+## Topics
+
+`thunderbird` · `betterbird` · `thunderbird-addon` · `mail-extension` · `webextension` · `ollama` · `llm` · `email-classification` · `ai` · `local-ai` · `email-automation`

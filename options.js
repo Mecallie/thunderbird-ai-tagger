@@ -1,6 +1,8 @@
 // options.js - Logic for the settings page
 // Handles tabs, tag CRUD, settings, test classification, and manual runs.
 
+import { promptFolderSelection } from "./utils/folders.js";
+
 let currentTags = [];
 let currentActions = [];
 
@@ -14,7 +16,9 @@ document.addEventListener("DOMContentLoaded", async () => {
   // Auto-save on some changes (simple version)
   document.getElementById("ollamaUrl").addEventListener("change", saveSettingsFromForm);
   document.getElementById("ollamaModel").addEventListener("change", saveSettingsFromForm);
+  document.getElementById("maxBodyChars").addEventListener("change", saveSettingsFromForm);
   document.getElementById("autoProcessEnabled").addEventListener("change", saveSettingsFromForm);
+  document.getElementById("processedTagName").addEventListener("change", saveSettingsFromForm);
 
   // Button listeners (more reliable than inline onclick)
   const addTagBtn = document.getElementById("add-tag-btn");
@@ -80,15 +84,67 @@ async function loadSettingsIntoForm() {
 }
 
 async function saveSettingsFromForm() {
-  const newSettings = {
+  const data = await browser.storage.local.get("settings");
+  const existing = data.settings || {};
+  const newProcessedTagName = document.getElementById("processedTagName").value.trim() || "🤖 AI-Processed";
+  const processedTagNameChanged = existing.processedTagName !== newProcessedTagName;
+
+  const merged = {
+    ...existing,
     ollamaUrl: document.getElementById("ollamaUrl").value.trim(),
     ollamaModel: document.getElementById("ollamaModel").value.trim(),
     maxBodyChars: parseInt(document.getElementById("maxBodyChars").value) || 6000,
     autoProcessEnabled: document.getElementById("autoProcessEnabled").checked,
-    processedTagName: document.getElementById("processedTagName").value.trim() || "🤖 AI-Processed",
+    processedTagName: newProcessedTagName,
   };
-  await browser.storage.local.set({ settings: newSettings });
+
+  if (processedTagNameChanged) {
+    delete merged.processedTagKey;
+  }
+
+  await browser.storage.local.set({ settings: merged });
   showStatus("Settings saved", true);
+}
+
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+async function sendToBackground(message) {
+  let response;
+  try {
+    response = await browser.runtime.sendMessage(message);
+  } catch (e) {
+    throw new Error(`Background script unreachable: ${e.message}`);
+  }
+
+  if (response === undefined) {
+    const ping = await browser.runtime.sendMessage({ type: "ping" }).catch(() => undefined);
+    if (!ping?.success) {
+      throw new Error(
+        "No response from background script. Open about:debugging → This Thunderbird → AI Tagger → Inspect, and check the console for errors."
+      );
+    }
+    throw new Error("Background script did not respond to the request.");
+  }
+
+  return response;
+}
+
+async function lookupTagKeyByName(tagName) {
+  if (!browser.messages?.tags?.list) return null;
+  try {
+    const tags = await browser.messages.tags.list();
+    const found = tags.find(t => t.tag === tagName);
+    return found?.key || null;
+  } catch (e) {
+    console.warn("Could not list tags:", e);
+    return null;
+  }
 }
 
 // ==================== TAGS UI ====================
@@ -104,12 +160,10 @@ function renderTags() {
   currentTags.forEach((tag, index) => {
     const row = document.createElement("div");
     row.className = "tag-row";
-    const escapedDesc = (tag.description || '').replace(/"/g, '&quot;');
-
     row.innerHTML = `
-      <input type="text" value="${tag.name}" placeholder="Tag name" style="flex:1; max-width:180px;" data-field="name" data-index="${index}">
-      <input type="text" value="${escapedDesc}" placeholder="Natural language description..." style="flex:2.5;" data-field="description" data-index="${index}">
-      <input type="text" value="${tag.keywords || ''}" placeholder="Keywords (comma separated)" style="flex:1.5;" data-field="keywords" data-index="${index}">
+      <input type="text" value="${escapeHtml(tag.name)}" placeholder="Tag name" style="flex:1; max-width:180px;" data-field="name" data-index="${index}">
+      <input type="text" value="${escapeHtml(tag.description)}" placeholder="Natural language description..." style="flex:2.5;" data-field="description" data-index="${index}">
+      <input type="text" value="${escapeHtml(tag.keywords)}" placeholder="Keywords (comma separated)" style="flex:1.5;" data-field="keywords" data-index="${index}">
       <input type="number" value="${tag.priority || 0}" style="width:70px;" title="Priority (higher = more important)" data-field="priority" data-index="${index}">
       <label style="display:flex; align-items:center; gap:4px; white-space:nowrap;">
         <input type="checkbox" ${tag.enabled !== false ? "checked" : ""} data-field="enabled" data-index="${index}"> Enabled
@@ -181,14 +235,17 @@ async function saveAllTags() {
     return;
   }
 
-  // Try to create tags in Thunderbird and capture keys
   for (const tag of currentTags) {
-    if (!tag.key && browser.messages && browser.messages.tags && typeof browser.messages.tags.create === "function") {
-      try {
-        const key = await browser.messages.tags.create(null, tag.name, "#64748b");
-        tag.key = key;
-      } catch (e) {
-        // Tag probably already exists or creation failed — we'll fall back to name
+    if (tag.key) continue;
+    if (!browser.messages?.tags?.create) continue;
+
+    try {
+      tag.key = await browser.messages.tags.create(null, tag.name, "#64748b");
+    } catch (e) {
+      const existingKey = await lookupTagKeyByName(tag.name);
+      if (existingKey) {
+        tag.key = existingKey;
+      } else {
         console.warn(`Could not create tag "${tag.name}" to get key:`, e.message);
       }
     }
@@ -237,11 +294,11 @@ function renderActions() {
 
     div.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center;">
-        <strong>${rule.name || "Unnamed Rule"}</strong>
+        <strong>${escapeHtml(rule.name || "Unnamed Rule")}</strong>
         <button class="secondary" data-action="delete" data-index="${index}">Delete</button>
       </div>
-      <small>Condition: <strong>${tags.join(` ${operator} `) || "(none)"}</strong></small><br>
-      <small>Action: ${actionText}</small>
+      <small>Condition: <strong>${escapeHtml(tags.join(` ${operator} `) || "(none)")}</strong></small><br>
+      <small>Action: ${escapeHtml(actionText)}</small>
     `;
 
     container.appendChild(div);
@@ -265,7 +322,7 @@ function renderActions() {
       <select id="new-rule-action" style="width:100%; margin-bottom:8px;">
         <option value="move">Move to folder</option>
         <option value="archive">Archive</option>
-        <option value="delete">Delete</option>
+        <option value="moveToTrash">Move to Trash</option>
       </select>
 
       <div style="display:flex; gap:8px; margin-bottom:12px;">
@@ -340,22 +397,12 @@ function createNewRule() {
 
 async function chooseFolderForRule() {
   try {
-    const accounts = await browser.accounts.list();
-    if (!accounts?.length) return alert("No accounts found.");
-
-    const folders = await browser.folders.getSubFolders(accounts[0].rootFolder, false);
-    if (!folders?.length) return alert("No folders found.");
-
-    let list = folders.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
-    const choice = prompt("Select folder number:\n\n" + list);
-    const idx = parseInt(choice) - 1;
-
-    if (folders[idx]) {
-      document.getElementById("new-rule-folder-id").value = folders[idx].id || folders[idx].path;
-    }
+    const selected = await promptFolderSelection("Select destination folder:");
+    if (!selected) return;
+    document.getElementById("new-rule-folder-id").value = selected.id;
   } catch (e) {
-    console.error(e);
-    alert("Could not load folders.");
+    console.error("[AI Tagger] Folder picker error:", e);
+    alert(`Could not load folders: ${e.message}`);
   }
 }
 
@@ -378,15 +425,21 @@ async function runTestClassification() {
     return;
   }
 
+  const enabledTags = currentTags.filter(t => t.enabled);
+  if (!enabledTags.length) {
+    alert("No enabled tags defined. Add and save at least one enabled tag first.");
+    return;
+  }
+
   const resultDiv = document.getElementById("test-result");
   resultDiv.style.display = "block";
-  resultDiv.textContent = "Calling Ollama...";
+  resultDiv.textContent = "Calling Ollama via background script (may take up to 2 minutes)...";
 
   try {
-    const response = await browser.runtime.sendMessage({
+    const response = await sendToBackground({
       type: "testClassification",
       sampleEmail: { subject, body },
-      tags: currentTags.filter(t => t.enabled),
+      tags: enabledTags,
     });
 
     if (response.success) {
@@ -424,34 +477,56 @@ async function testOllamaConnection() {
 
 async function runOnCurrentFolder() {
   try {
-    const accounts = await browser.accounts.list();
-    if (!accounts?.length) return alert("No accounts found.");
+    const selected = await promptFolderSelection("Select folder to classify:");
+    if (!selected) return;
 
-    const folders = await browser.folders.getSubFolders(accounts[0].rootFolder, false);
-    if (!folders?.length) return alert("No folders found.");
+    if (!confirm(`Run AI classification on "${selected.label}"?`)) return;
 
-    let list = folders.map((f, i) => `${i + 1}. ${f.name}`).join("\n");
-    const choice = prompt("Select folder to run classification on:\n\n" + list);
-    const idx = parseInt(choice) - 1;
+    const response = await sendToBackground({
+      type: "classifyFolder",
+      folderId: selected.id,
+      options: { limit: 50, onlyUnprocessed: true },
+    });
 
-    if (!folders[idx]) return;
-
-    const folderId = folders[idx].id || folders[idx].path;
-
-    if (!confirm(`Run AI classification on folder "${folders[idx].name}"?`)) return;
-
-    // For now we just show how it would work
-    alert(`Would run classification on folder: ${folders[idx].name}\n\nFolder ID: ${folderId}\n\n(Full implementation requires classifyFolder background support)`);
-
-    // Future: await browser.runtime.sendMessage({ type: "classifyFolder", folderId });
+    if (response.success) {
+      const { processed, skipped } = response.result;
+      alert(`Classification complete for "${selected.label}".\n\nProcessed: ${processed}\nSkipped (already processed): ${skipped}`);
+    } else {
+      alert(`Classification failed: ${response.error}`);
+    }
   } catch (e) {
-    console.error(e);
-    alert("Could not load folders.");
+    console.error("[AI Tagger] Folder run error:", e);
+    alert(`Could not run classification: ${e.message}`);
   }
 }
 
 async function runOnAllUnprocessed() {
-  alert("Bulk run on all accounts will be added. It re-uses the same efficient processMessage function.");
+  if (!confirm("Run AI classification on all unprocessed emails across all accounts?\n\nThis may take a while depending on folder sizes.")) {
+    return;
+  }
+
+  try {
+    const response = await sendToBackground({
+      type: "classifyAllUnprocessed",
+      options: { limitPerFolder: 25 },
+    });
+
+    if (response?.success) {
+      const { processed, skipped, folders } = response.result;
+      const folderSummary = (folders || [])
+        .map(f => `${f.folder}: ${f.processed} processed`)
+        .join("\n");
+      alert(
+        `Bulk classification complete.\n\nProcessed: ${processed}\nSkipped: ${skipped}` +
+        (folderSummary ? `\n\nFolders with activity:\n${folderSummary}` : "")
+      );
+    } else {
+      alert(`Bulk classification failed: ${response?.error || "Unknown error"}`);
+    }
+  } catch (e) {
+    console.error(e);
+    alert(`Bulk classification failed: ${e.message}`);
+  }
 }
 
 // Helper

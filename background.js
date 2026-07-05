@@ -7,8 +7,8 @@ import * as ollama from './utils/ollama.js';
 import * as emailUtils from './utils/email.js';
 import * as tagManager from './utils/tagManager.js';
 import * as actionEngine from './utils/actionEngine.js';
+import * as folderUtils from './utils/folders.js';
 
-// Special tag used to mark emails as already processed by AI
 const DEFAULT_PROCESSED_TAG = "🤖 AI-Processed";
 
 // ============================================
@@ -17,11 +17,9 @@ const DEFAULT_PROCESSED_TAG = "🤖 AI-Processed";
 async function initialize() {
   console.log("[AI Tagger] Background script starting...");
 
-  // Ensure default settings and processed tag exist
   await storage.ensureDefaults();
   await ensureProcessedTagExists();
 
-  // Set up listeners
   setupListeners();
 
   console.log("[AI Tagger] Ready. Ollama-first design active.");
@@ -31,27 +29,47 @@ async function ensureProcessedTagExists() {
   const settings = await storage.getSettings();
   const tagName = settings.processedTagName || DEFAULT_PROCESSED_TAG;
 
-  try {
-    if (browser.messages && browser.messages.tags && typeof browser.messages.tags.create === "function") {
-      await browser.messages.tags.create(null, tagName, "#6366f1");
-      console.log(`[AI Tagger] Created/ensured processed marker tag: ${tagName}`);
-    }
-  } catch (err) {
-    // Tag probably already exists — this is fine
-    if (!err.message?.toLowerCase().includes("already")) {
-      console.warn("[AI Tagger] Could not create processed tag:", err.message);
-    }
+  if (settings.processedTagKey) {
+    return settings.processedTagKey;
   }
+
+  const key = await tagManager.ensureTagExists(tagName, "#6366f1");
+  if (key) {
+    await storage.saveSettings({ processedTagKey: key });
+    console.log(`[AI Tagger] Processed marker tag key: ${key}`);
+    return key;
+  }
+
+  return null;
+}
+
+async function getProcessedTagKey(settings) {
+  if (settings.processedTagKey) return settings.processedTagKey;
+  return ensureProcessedTagExists();
+}
+
+function isMessageProcessed(header, processedTagKey) {
+  return Boolean(
+    processedTagKey &&
+    header.tags &&
+    header.tags.includes(processedTagKey)
+  );
+}
+
+async function mergeMessageTags(messageId, tagKeysToAdd) {
+  const header = await browser.messages.get(messageId);
+  const currentTags = header.tags || [];
+  const merged = [...new Set([...currentTags, ...tagKeysToAdd.filter(Boolean)])];
+  await browser.messages.update(messageId, { tags: merged });
+  return merged;
 }
 
 function setupListeners() {
-  // Automatic processing on new mail
   if (browser.messages && browser.messages.onNewMailReceived) {
     browser.messages.onNewMailReceived.addListener(async (folder, messageList) => {
       const settings = await storage.getSettings();
       if (!settings.autoProcessEnabled) return;
 
-      // Optional scoping by account
       if (settings.scopedAccountIds && settings.scopedAccountIds.length > 0) {
         if (!settings.scopedAccountIds.includes(folder.accountId)) return;
       }
@@ -59,7 +77,6 @@ function setupListeners() {
       console.log(`[AI Tagger] New mail received in ${folder.name} (${messageList.messages.length} messages)`);
 
       for (const msgHeader of messageList.messages) {
-        // Process asynchronously, don't block other mail
         processMessage(msgHeader.id).catch(err => {
           console.error(`[AI Tagger] Error processing message ${msgHeader.id}:`, err);
         });
@@ -69,23 +86,18 @@ function setupListeners() {
     console.warn("[AI Tagger] onNewMailReceived not available in this Thunderbird version.");
   }
 
-  // Toolbar button (action) - manual trigger for selected or current view
-  browser.action.onClicked.addListener(async (tab) => {
+  browser.action.onClicked.addListener(async () => {
     browser.runtime.openOptionsPage();
   });
 
-  // Context menu: Right-click on message → AI Tagger: Run now
   if (browser.menus) {
-    browser.menus.create({
-      id: "ai-tagger-run-now",
-      title: "AI Tagger: Run classification now",
-      contexts: ["message_list", "message_display_action"],
+    setupContextMenu().catch(err => {
+      console.warn("[AI Tagger] Context menu setup failed:", err);
     });
 
-    browser.menus.onClicked.addListener(async (info, tab) => {
+    browser.menus.onClicked.addListener(async (info) => {
       if (info.menuItemId === "ai-tagger-run-now") {
         try {
-          // Get selected messages
           const messages = await browser.messages.getSelectedMessages();
           if (messages && messages.messages.length > 0) {
             for (const msg of messages.messages) {
@@ -102,17 +114,35 @@ function setupListeners() {
     });
   }
 
-  // Listen for messages from options page (manual runs, test, etc.)
   browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === "ping") {
+      sendResponse({ success: true, status: "ready" });
+      return false;
+    }
+
+    if (message.type === "listFolders") {
+      folderUtils.listSelectableFolders()
+        .then(folders => sendResponse({ success: true, folders }))
+        .catch(err => sendResponse({ success: false, error: err.message }));
+      return true;
+    }
+
     if (message.type === "classifyMessage") {
       processMessage(message.messageId, { force: message.force || false })
         .then(result => sendResponse({ success: true, result }))
         .catch(err => sendResponse({ success: false, error: err.message }));
-      return true; // Keep channel open for async
+      return true;
     }
 
     if (message.type === "classifyFolder") {
       classifyFolder(message.folderId, message.options || {})
+        .then(result => sendResponse({ success: true, result }))
+        .catch(err => sendResponse({ success: false, error: err.message }));
+      return true;
+    }
+
+    if (message.type === "classifyAllUnprocessed") {
+      classifyAllUnprocessed(message.options || {})
         .then(result => sendResponse({ success: true, result }))
         .catch(err => sendResponse({ success: false, error: err.message }));
       return true;
@@ -127,76 +157,75 @@ function setupListeners() {
   });
 }
 
+async function setupContextMenu() {
+  try {
+    await browser.menus.remove("ai-tagger-run-now");
+  } catch (_) {}
+
+  await browser.menus.create({
+    id: "ai-tagger-run-now",
+    title: "AI Tagger: Run classification now",
+    contexts: ["message_list", "message_display_action"],
+  });
+}
+
 // ============================================
 // MAIN CLASSIFICATION LOGIC
 // ============================================
 export async function processMessage(messageId, options = {}) {
   const { force = false } = options;
-  const settings = await storage.getSettings();
-  const processedTag = settings.processedTagName || DEFAULT_PROCESSED_TAG;
+  let settings = await storage.getSettings();
+  const processedTagKey = await getProcessedTagKey(settings);
 
   try {
-    // 1. Get message header to check if already processed
     const header = await browser.messages.get(messageId);
     if (!header) {
       console.warn(`[AI Tagger] Message ${messageId} not found`);
       return { skipped: true, reason: "not_found" };
     }
 
-    const alreadyProcessed = header.tags && header.tags.includes(processedTag);
-    if (alreadyProcessed && !force) {
+    if (isMessageProcessed(header, processedTagKey) && !force) {
       console.log(`[AI Tagger] Skipping already processed message: ${header.subject}`);
       return { skipped: true, reason: "already_processed" };
     }
 
-    // 2. Extract clean email content
     const emailContent = await emailUtils.getMessageContent(messageId, settings.maxBodyChars || 6000);
     if (!emailContent || !emailContent.body) {
       console.warn("[AI Tagger] No body content, skipping LLM call");
-      await markAsProcessed(messageId, processedTag);
+      await markAsProcessed(messageId, processedTagKey);
       return { skipped: true, reason: "no_content" };
     }
 
-    // 3. Load active tags
     const allTags = await storage.getTags();
     const activeTags = allTags.filter(t => t.enabled);
 
     if (activeTags.length === 0) {
       console.log("[AI Tagger] No active tags defined. Marking as processed only.");
-      await markAsProcessed(messageId, processedTag);
+      await markAsProcessed(messageId, processedTagKey);
       return { skipped: true, reason: "no_active_tags" };
     }
 
-    // 4. Call LLM (one call for all tags)
     console.log(`[AI Tagger] Classifying "${header.subject}" with ${activeTags.length} tags via Ollama...`);
     const llmResult = await ollama.classifyEmail(emailContent, activeTags, settings);
 
-    // 5. Post-process tags (priority + stopProcessing logic)
     const finalTagNames = applyPriorityAndStopLogic(llmResult.matched_tags || [], allTags, llmResult.primary_tag);
 
-    // Resolve tag names to keys (more reliable for messages.update)
     const tagKeyMap = new Map(allTags.map(t => [t.name, t.key || t.name]));
     const finalTagKeys = finalTagNames.map(name => tagKeyMap.get(name) || name);
+    const tagsToApply = [...finalTagKeys];
+    if (processedTagKey) tagsToApply.push(processedTagKey);
 
-    // Also handle processed tag key if available
-    const processedTagKey = settings.processedTagKey || processedTag;
-
-    // 6. Apply tags to the message (using keys when available)
-    const tagsToApply = [...finalTagKeys, processedTagKey];
     console.log(`[AI Tagger] Attempting to apply tags to message ${messageId}:`, tagsToApply);
 
     try {
-      await browser.messages.update(messageId, {
-        tags: tagsToApply
-      });
+      await mergeMessageTags(messageId, tagsToApply);
       console.log(`[AI Tagger] Successfully applied tags to message ${messageId}: ${finalTagNames.join(", ")}`);
     } catch (updateError) {
       console.error(`[AI Tagger] Failed to apply tags to message ${messageId}:`, updateError);
-      await markAsProcessed(messageId, processedTag);
+      await markAsProcessed(messageId, processedTagKey);
       throw updateError;
     }
 
-    // 7. Execute any matching actions
     const executedActions = await actionEngine.evaluateAndExecute(messageId, finalTagNames, settings);
 
     console.log(`[AI Tagger] Successfully tagged message ${messageId} with: ${finalTagNames.join(", ")} (primary: ${llmResult.primary_tag || finalTagNames[0] || "none"})`);
@@ -211,38 +240,29 @@ export async function processMessage(messageId, options = {}) {
 
   } catch (error) {
     console.error(`[AI Tagger] Failed to process message ${messageId}:`, error);
-    // Still mark as processed to avoid infinite retries on bad emails
     try {
-      await markAsProcessed(messageId, processedTag);
+      await markAsProcessed(messageId, processedTagKey);
     } catch (_) {}
     throw error;
   }
 }
 
-async function markAsProcessed(messageId, processedTag) {
+async function markAsProcessed(messageId, processedTagKey) {
+  if (!processedTagKey) return;
   try {
-    const header = await browser.messages.get(messageId);
-    const currentTags = header.tags || [];
-    if (!currentTags.includes(processedTag)) {
-      await browser.messages.update(messageId, {
-        tags: [...currentTags, processedTag]
-      });
-    }
+    await mergeMessageTags(messageId, [processedTagKey]);
   } catch (e) {
     console.warn("Could not mark as processed:", e);
   }
 }
 
-// Apply priority ordering and stopProcessing logic
 function applyPriorityAndStopLogic(matchedTagNames, allTagDefs, llmPrimary) {
   if (!matchedTagNames || matchedTagNames.length === 0) return [];
 
-  // Get full tag objects for matched names
   const matchedDefs = matchedTagNames
     .map(name => allTagDefs.find(t => t.name === name))
     .filter(Boolean);
 
-  // Sort by priority descending (higher number = higher priority)
   matchedDefs.sort((a, b) => (b.priority || 0) - (a.priority || 0));
 
   const final = [];
@@ -253,17 +273,15 @@ function applyPriorityAndStopLogic(matchedTagNames, allTagDefs, llmPrimary) {
 
     if (tagDef.stopProcessing) {
       stopAfterThis = true;
-      // Still include this stop tag
     }
 
     if (stopAfterThis) {
-      break; // Stop adding lower priority tags after a stop tag
+      break;
     }
   }
 
-  // Ensure primary is included if specified by LLM
   if (llmPrimary && !final.includes(llmPrimary)) {
-    final.unshift(llmPrimary); // Put primary first
+    final.unshift(llmPrimary);
   }
 
   return final;
@@ -275,28 +293,17 @@ function applyPriorityAndStopLogic(matchedTagNames, allTagDefs, llmPrimary) {
 export async function classifyFolder(folderId, options = {}) {
   const { limit = 50, onlyUnprocessed = true } = options;
   const settings = await storage.getSettings();
-  const processedTag = settings.processedTagName || DEFAULT_PROCESSED_TAG;
+  const processedTagKey = await getProcessedTagKey(settings);
 
   console.log(`[AI Tagger] Starting folder classification for ${folderId}`);
-
-  // Query messages in the folder
-  let queryInfo = { folderId };
-  if (onlyUnprocessed) {
-    // Thunderbird query supports tags filter? We may need to list and filter client-side
-    // For simplicity in v1: list all and skip processed ones in the loop
-  }
 
   const messageList = await browser.messages.list(folderId);
   let processedCount = 0;
   let skippedCount = 0;
 
-  // Note: For large folders we should use pagination (continueList)
-  // This is a simplified version
   for (const msg of messageList.messages.slice(0, limit)) {
-    const header = await browser.messages.get(msg.id); // refresh to get current tags
-    const isProcessed = header.tags && header.tags.includes(processedTag);
-
-    if (onlyUnprocessed && isProcessed) {
+    const header = await browser.messages.get(msg.id);
+    if (onlyUnprocessed && isMessageProcessed(header, processedTagKey)) {
       skippedCount++;
       continue;
     }
@@ -304,7 +311,6 @@ export async function classifyFolder(folderId, options = {}) {
     try {
       await processMessage(msg.id, { force: !onlyUnprocessed });
       processedCount++;
-      // Small delay to be polite to local Ollama
       await new Promise(r => setTimeout(r, 300));
     } catch (e) {
       console.error("Batch error on message", msg.id, e);
@@ -314,5 +320,43 @@ export async function classifyFolder(folderId, options = {}) {
   return { processed: processedCount, skipped: skippedCount };
 }
 
-// Boot the extension
+export async function classifyAllUnprocessed(options = {}) {
+  const { limitPerFolder = 25 } = options;
+  const accounts = await browser.accounts.list();
+  let totalProcessed = 0;
+  let totalSkipped = 0;
+  const folderResults = [];
+
+  for (const account of accounts) {
+    let folders = [];
+    try {
+      const rootId = account.rootFolder?.id;
+      if (!rootId) continue;
+      folders = await browser.folders.getSubFolders(rootId, true);
+    } catch (e) {
+      console.warn(`[AI Tagger] Could not list folders for account ${account.name}:`, e);
+      continue;
+    }
+
+    for (const folder of folders) {
+      if (!folder.id) continue;
+      try {
+        const result = await classifyFolder(folder.id, {
+          limit: limitPerFolder,
+          onlyUnprocessed: true,
+        });
+        totalProcessed += result.processed;
+        totalSkipped += result.skipped;
+        if (result.processed > 0) {
+          folderResults.push({ folder: folder.name, ...result });
+        }
+      } catch (e) {
+        console.error(`[AI Tagger] Error classifying folder ${folder.name}:`, e);
+      }
+    }
+  }
+
+  return { processed: totalProcessed, skipped: totalSkipped, folders: folderResults };
+}
+
 initialize().catch(console.error);

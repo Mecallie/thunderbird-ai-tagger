@@ -3,6 +3,22 @@
 // Designed so a cloud provider module can later replace or wrap this.
 
 const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
+const DEFAULT_FETCH_TIMEOUT_MS = 120000;
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)}s`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
  * Main classification function - ONE LLM call for all tags.
@@ -38,7 +54,7 @@ export async function classifyEmail(emailContent, activeTags, settings) {
   };
 
   try {
-    const response = await fetch(`${ollamaUrl}/api/chat`, {
+    const response = await fetchWithTimeout(`${ollamaUrl}/api/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),

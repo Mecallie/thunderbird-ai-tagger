@@ -1,5 +1,4 @@
 // utils/actionEngine.js - Evaluate and execute post-classification actions
-// v1: Basic structure. Full rule engine can be expanded later.
 
 export async function evaluateAndExecute(messageId, finalTagNames, settings) {
   const actions = await (await import('./storage.js')).getActions();
@@ -34,9 +33,25 @@ function evaluateCondition(condition, finalTagNames) {
 
   if (condition.operator === "OR") {
     return hasAny;
-  } else {
-    // Default to AND
-    return hasAll;
+  }
+
+  return hasAll;
+}
+
+async function findTrashFolderId(messageId) {
+  const header = await browser.messages.get(messageId);
+  const folder = header.folder;
+  if (!folder?.accountId) return null;
+
+  try {
+    const trashFolders = await browser.folders.query({
+      accountId: folder.accountId,
+      specialUse: ["trash"],
+    });
+    return trashFolders[0]?.id || null;
+  } catch (e) {
+    console.warn("[AI Tagger] Could not query trash folder:", e);
+    return null;
   }
 }
 
@@ -53,15 +68,21 @@ async function executeAction(messageId, action) {
       await browser.messages.archive([messageId]);
       break;
 
-    case "delete":
+    case "moveToTrash":
       try {
         if (typeof browser.messages.delete === "function") {
-          await browser.messages.delete([messageId], { deletePermanently: action.permanent || false });
+          await browser.messages.delete([messageId], { deletePermanently: false });
         } else {
-          console.warn("[AI Tagger] browser.messages.delete() is not available in this environment. Delete action skipped.");
+          const trashFolderId = await findTrashFolderId(messageId);
+          if (trashFolderId) {
+            await browser.messages.move([messageId], trashFolderId);
+          } else {
+            throw new Error("Trash folder not found and messages.delete() unavailable");
+          }
         }
       } catch (e) {
-        console.error("[AI Tagger] Delete action failed:", e);
+        console.error("[AI Tagger] Move to Trash action failed:", e);
+        throw e;
       }
       break;
 
@@ -73,7 +94,6 @@ async function executeAction(messageId, action) {
       await browser.messages.update(messageId, { read: false });
       break;
 
-    // Future: forward, reply, add/remove extra tags, etc.
     default:
       console.log("Action type not yet implemented:", action.type);
   }

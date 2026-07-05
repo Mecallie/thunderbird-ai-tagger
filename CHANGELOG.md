@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.20] - 2026-07-05
+
+### Fixed
+- Folder picker: pass folder ID (not folder object) to `folders.getSubFolders` / use `folders.query` — fixes "Incorrect argument types" error.
+- Processed-tag detection now uses Thunderbird tag **keys** instead of display names.
+- Settings save merges with existing values instead of wiping `processedTagKey` and other fields.
+- Tag application merges with existing message tags instead of replacing them.
+- `moveToTrash` action completes via `messages.delete` or trash-folder fallback.
+
+### Added
+- Extension icons, `.webextensionignore`, and lean `web-ext` build (dev files excluded).
+- `messagesTagsList` and `messagesDelete` permissions.
+- Bulk classify wired in Options; Ollama fetch timeout; background `ping` handler.
+- `utils/folders.js` for cross-account folder selection.
+
 ## [0.1.4] - 2026-06-23
 
 ### Added
